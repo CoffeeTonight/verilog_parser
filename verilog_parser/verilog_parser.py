@@ -27,9 +27,19 @@ class HDL:
 
     def __init__(self, name):
         self.name = name
-        for i in ["inst", "comment", "preprocessor", "subroutine", "param", "lparam",
-                  "wire", "reg", "assign", "definition", "inlinedefine"]:
+        for i in ["inst", "port", "comment", "preprocessor", "subroutine", "param", "lparam",
+                  "wire", "reg", "assign", "definition", "inlinedefine", "unknown"]:
             self.__setattr__(i, {})
+
+
+class PORT:
+    def __repr__(self):
+        return f'{self.vlnv}'
+
+    def __init__(self, name):
+        self.name = name
+        for i in ["dir", "dimm", "array", "type", "vlnv", "logicalName", "prefix", "postfix"]:
+            self.__setattr__(i, str)
 
 
 class HDLFILE:
@@ -38,6 +48,8 @@ class HDLFILE:
 
     def __init__(self, vfile):
         self.name = vfile
+        self.preprocessor = {}
+        self.unknown = {}
         self.inst = []
 
 
@@ -51,14 +63,16 @@ class verilog_parser():
                       "module": {"module": "endmodule"},
                       "port": {"input": ";", "output": ";", "inout": ";"},
                       "definition": {"assign": ";", "wire": ";", "reg": ";"},
-                      "rtl": {"always": "\n"},
+                      "rtl": {"always": "\n", "always@": "\n", "always@(": "\n"},
                       "tbd": {None: "\n"},
                       "ifdef": [
                           {"`ifdef": True, "`ifndef": False},
                           {"`else": None, "`elsif": True},
                           {"`endif": None}
                       ],
-                      "preprocess": {"`define": "\n", "`timescale": "\n"},
+                      "preprocess": {"`define": "\n", "`timescale": "\n", "`include": "\n"},
+                      "param": {"parameter": [",", ")"]},
+                      "lparam": {"localparam": ";"},
                       "div": ["\n", " "]
                       }
         self.args = args
@@ -90,8 +104,9 @@ class verilog_parser():
         else:
             defines = {i.split("=")[0]: i.split("=")[-1] if "=" in i else True for i in defines.split(",")}
         self.define = defines
+        self.define.update({1: True, 0: False, "1": True, "0": False})
 
-    def cutout_code(self, txt, conts):
+    def cutout_code(self, txt, conts: dict):
         code = txt
         idx_ = True
         cutout_code = []
@@ -158,66 +173,59 @@ class verilog_parser():
                 if isinstance(k, str):
                     v[k] = 1
                     continue
-                if k != 0:
-                    continue
                 defstart = list(v)[0]
                 seqval = v[defstart][0]
-                defend = seqval["E"]
-                curtxt = rctxt[TXTPOS:defstart]
+                subseq_pos = {list(i)[0]: n for n, i in enumerate(useq) if isinstance(i, dict)}
                 # todo: find inlinedefine & add
+                curtxt = rctxt[TXTPOS:defstart]
+                TXTPOS = defstart
                 founded_cond = self.find_definition(curtxt, cond)
-                if seqval["DEF"] == True:
+                if founded_cond != {}:
                     self.inlinedefine.update(founded_cond)
                     cond.update(founded_cond)
                 # todo: ifdef again with inlinedefine
-                if seqval["TF"] != None:
-                    defval = seqval["defcode"].rstrip().split(" ")[-1]
-                    seqval["DEF"] = (defval in self.inlinedefine and self.inlinedefine[defval]) == seqval["TF"]
-
-                subseq_pos = {list(i)[0]: n for n, i in enumerate(useq) if isinstance(i, dict)}
-                last_pos = 1 if 1 in subseq_pos else 2
-                defend = defend if seqval["DEF"] else self.findValinDict(useq[subseq_pos[last_pos]], "E")
-                subseq_range = useq[1: subseq_pos[1]+1] if seqval["DEF"] else useq[subseq_pos[last_pos]:]
-
-                for ss in subseq_range:
-                    if isinstance(ss, list):
-                        rctxt, cond = self.txt_recursive(rctxt, ss, cond, TOP=False)
+                defval = seqval["defcode"].rstrip().split(" ")[-1]
+                seqval["DEF"] = (defval in cond and cond[defval]) == seqval["TF"]
+                idx_next_seq = subseq_pos[1] if 1 in subseq_pos else subseq_pos[2]
+                if seqval["DEF"]:
+                    codestart = seqval["E"]
+                    subseq_range = useq[1: idx_next_seq+1]
+                else:
+                    codestart = self.findValbyKey(useq[idx_next_seq], "E")
+                    subseq_range = useq[idx_next_seq + 1:]
+                seqend = self.findValbyKey(useq[-1], "E")
+                for _s in subseq_range:
+                    if isinstance(_s, list):
+                        rctxt, cond = self.txt_recursive(rctxt, _s, cond, TOP=False, TXTPOS=TXTPOS)
                         continue
-                    seqend = self.findValinDict(useq[-1], "E")
                     beforetxt = rctxt[defstart:seqend]
-                    codeend = list(ss[list(ss)[0]])[0]
-                    aftertxt = rctxt[defend:codeend]
+                    codeend = list(_s[list(_s)[0]])[0]
+                    aftertxt = rctxt[codestart:codeend]
                     aftertxt = "\t"*(beforetxt.__len__() - aftertxt.__len__()) + aftertxt
                     assert aftertxt.__len__() == beforetxt.__len__(), "ERR:: Check Tool"
                     chgtxt = rctxt[:defstart] + aftertxt + rctxt[seqend:]
                     assert rctxt.__len__() == chgtxt.__len__(), "ERR:: Check Tool"
                     rctxt = chgtxt
-
+                    TXTPOS = seqend
                 a = rctxt[k:seqval["E"]]
-            a = 0
-
         return rctxt, cond
 
-    def findValinDict(self, ss, key):
-        if isinstance(ss, dict):
-            if key in ss:
-                return ss[key]
+    def findValbyKey(self, _s, key):
+        if isinstance(_s, dict):
+            if key in _s:
+                return _s[key]
             else:
-                for k, v in ss.items():
-                    val = self.findValinDict(v, key)
+                for k, v in _s.items():
+                    val = self.findValbyKey(v, key)
                     if val:
                         return val
         else:
             return None
 
     def merge_nestedcode(self, txt, seq, offset=0):
-        cseq = seq
         cseq = [[list(v)[0], {k: v}] for k, v in seq.items()]
         seq_rec = self.get_recursive(cseq)
         cond = copy.deepcopy(self.define)
-        curoffset = offset
-        seq_queue = sorted(list(seq))
-        continue_cnt = 0
         ntxt = txt
         rc_txt, rc_cond = self.txt_recursive(ntxt, seq_rec, cond)
         return rc_txt, rc_cond
@@ -246,6 +254,11 @@ class verilog_parser():
         nested_seq = {i:{j: idx_rgx[j][i]} for i, j in nested_seq.items()}
         return ntxt, nested_seq
 
+    def getNameWith(self, v, statement):
+        _ = re.findall(f"{statement}\s+\w+", v)
+        if not _:
+            return None
+        return _[0][statement.__len__():].strip()
 
     def seq_parse(self):
         for file in self.hdlfile:
@@ -258,10 +271,54 @@ class verilog_parser():
             ncode, file.definition = self.conditionGen(ncode, self.startsends["ifdef"], self.define)
             defcode, code_seqs = self.merge_nestedcode(ncode, file.definition)
             assert ncode.__len__() == defcode.__len__(), "ERR::Check Tool"
-            for v in ncode.split("\n"):
-                if [i for i in list([]) if v.strip().startswith(i)]:
-                    a = 0
 
+            outofcode, lmodule = self.cutout_code(defcode.replace("\t", " "), self.startsends["module"])
+
+            for v in outofcode.replace("\t", "").split("\n"):
+                v = v.strip().rstrip()
+                if v == "":
+                    continue
+                #grep preprocessor
+                if any([v.startswith(i) for i in list(self.startsends["preprocess"])]):
+                    if "inCommand" not in file.preprocessor:
+                        file.preprocessor.update({"inCommand": self.define, "code": []})
+                    file.preprocessor["code"] += [v]
+                else:
+                    if "outofcode" not in file.unknown:
+                        file.unknown.update({"outofcode": []})
+                    file.unknown["outofcode"] += [v]
+
+            for v in lmodule:
+                module = HDL(None)
+                v = v.replace("\n", " ").split(";")
+                for _ in v:
+                    _ = _.strip().rstrip().replace(")", " ) ").replace("(", " ( ")
+                    if module.name is None:
+                        module.name = self.getNameWith(_, list(self.startsends["module"])[0])
+                    if "parameter " in _:
+                        module.param.update({i.split("=")[0].replace("parameter", "").strip().rstrip():
+                                                 i.split("=")[-1].strip().rstrip() \
+                                             for i in re.split(",|\)|\(|#", _) if "parameter " in i})
+                    if any([f"{i} " in _ for i in self.startsends["port"]]):
+                        ptype = "wire"
+                        pdim = ["", ""]
+                        for m in _.split("(")[-1].split(","):
+                            m = m.strip().replace("[", " [ ").replace("[", " ] ")
+                            pdir_ = [i for i in self.startsends["port"] if m.startswith(i)]
+                            pdir = pdir_[0] if pdir_ != [] else pdir
+                            ptype_ = [i for i in self.startsends["definition"] if i in m]
+                            ptype = ptype if ptype_ == [] else ptype[0] if pdir_ != [] else ptype
+                            pname = m.replace(pdir, "").replace(ptype, "").split("]")[-1].split("[")[0].strip().rstrip()
+                            if "[" in m:
+                                pdim = [i.split("]")[0].strip().rstrip() for i in m.split("[")] if pdir_ != [] else pdim
+                            port = PORT(pname)
+                            port.type = ptype
+                            port.dir = pdir
+                            port.array = pdim[0]
+                            port.dimm = pdim[1:]
+                            port.vlnv = "coffee2night:general:adhoc:1.0"
+                            module.port.update({pname: port})
+                file.inst += [module]
 
 if __name__=="__main__":
     import argparse

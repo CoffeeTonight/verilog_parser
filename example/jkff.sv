@@ -26,14 +26,17 @@ input clk
 ,input reset
 ,input wire [wd-1:0]I0
 ,input wire [wd-1:0]I1
-,output reg [wd-1:0]O
+,output reg [wd-1:0]O [1:0][1:0]
 );
+
+localparam LP=9;
 `ifdef SUM
 wire o = I0 + I1;
 `else
 wire o = I0 - I1;
 `endif
 always @(posedge clk or negedge reset) if (~reset) O <= 'h0; else O <= o;
+reg [1:0] a [4:0],b,c [6:0];
 
     endmodule
 // Module thisiscomment
