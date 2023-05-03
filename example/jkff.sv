@@ -95,6 +95,13 @@ Multiline Comment
 			endcase
 	end
 
+	CALC  ucalc(
+    .clk (clk)
+,   .reset (rst)
+,   .I0({16{q}})
+,   .I1({16{~q}})
+);
+
 `ifndef NOINST
 CALC #(.wd(16), .init(0)) icalc(
     .clk (clk)

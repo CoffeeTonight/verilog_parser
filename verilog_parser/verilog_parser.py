@@ -85,14 +85,19 @@ class verilog_parser():
         self.updateDefine()
         self.seq_parse()
 
+
+
+
+
     def openvfiles(self):
         assert os.path.isfile(self.args.src), f"ERR:: {self.args.src} File not founded"
         if self.args.src.endswith(".v") or self.args.src.endswith(".sv"):
             self.filelist = [self.args.src]
         else:
             with open(self.args.src, "r", encoding="utf8") as f:
+                f = f.readlines()
                 self.filelist = [f"{os.path.abspath(i.strip().rstrip())}"
-                                 for i in f.readlines() if i.strip().rstrip().isfile()]
+                                 for i in f if os.path.isfile(i.strip().rstrip())]
 
     def updateDefine(self):
         defines = self.args.define
@@ -271,9 +276,10 @@ class verilog_parser():
 
 
     def seq_parse(self):
-        for file in copy.deepcopy(self.hdlfile[1:]):
-            self.hdlfile += [self.extractFlist(file)]
-        for file in self.hdlfile:
+        hdlfile = []
+        for file in copy.deepcopy(self.hdlfile):
+            hdlfile += [self.extractFlist(file)]
+        for file in hdlfile:
             hdl = open(file.name, "r", encoding="utf8").read().replace("\t", "    ")
 
             #todo: find module
@@ -304,6 +310,16 @@ class verilog_parser():
                 module = HDL(None)
                 v = v.replace("\n", " ").split(";")
                 for _ in v:
+                    inst = re.findall("\w+[|\w+|#][\(\.|\w+][\(\.\w+\(\w+\)\,|\(\.\w+\(\w+\)]+\)",
+                                      _.replace(" ", "").replace("#", " #"))
+                    if inst:
+                        if "#" in _:
+                            inst_module = [i for i in _.split("#")[0].split(" ") if i != ""][-1]
+                            instance = inst[0].split("))")[1].split("(.")[0].strip().rstrip()
+                        else:
+                            inst_module = [i for i in _.split("(")[0].split(" ") if i != ""][-2]
+                            instance = [i for i in _.split("(.")[0].split(" ") if i != ""][-1]
+                        module.inst[instance] = {"code": _[_.index(inst_module):], "module": inst_module}
                     _ = _.strip().rstrip().replace(")", " ) ").replace("(", " ( ")
                     if module.name is None:
                         module.name = self.getNameWith(_, list(self.startsends["module"])[0])
@@ -345,30 +361,41 @@ class verilog_parser():
                             port.vlnv = "coffee2night::unknown::adhoc::1.0"
                             module.port.update({pname: port})
                 file.inst += [module]
+        self.hdlfile = hdlfile
         return self.hdlfile
 
 
-def dumppickle(sts):
+def dumppickle(args, sts='class.hdl.pickle'):
     import pickle
-    with open('hdl.class.pickle', 'wb') as fpick:
+    if isinstance(sts, verilog_parser):
+        sts = sts.args.src.split("/")[-1] + ".pickle"
+    os.makedirs(args.outdir, exist_ok=True)
+    with open(sts, 'wb') as fpick:
         pickle.dump(sts, fpick)
+    print(f"\nINFO::Pickle file for Meta data Had Stored, {sts}")
 
 
-def loadpickle(sts=None):
+def loadpickle(sts='class.hdl.pickle'):
     import pickle
-    with open('hdl.class.pickle' if sts is None else sts, 'rb') as fpick:
+    if isinstance(sts, verilog_parser):
+        sts = sts.args.src.split("/")[-1] + ".pickle"
+    with open(sts, 'rb') as fpick:
         return pickle.load(fpick)
+    print(f"\nINFO::Pickle file for Meta data Had Loaded, {sts}")
 
 
 if __name__=="__main__":
     import argparse
     parser = argparse.ArgumentParser(description='Optional app description')
     parser.add_argument('-s', '--src', help="source file", default="*.v")
+    parser.add_argument('-p', '--pickle', help="store meta as a pickle file", default="class.hdl.pickle")
+    parser.add_argument('-f', '--findcondition', help="Condition to find specific v file", default="")
     parser.add_argument('-D', '--define', help="source file", default="")
     parser.add_argument('-o', '--outdir', action="store", help="directory for result", default="OUT_VPARSE")
     args = parser.parse_args()
 
     class_hdlfile = verilog_parser(args)
-    dumppickle(class_hdlfile)
+
+    dumppickle(args, class_hdlfile)
     # mhdlfile_ = loadpickle()
     a = 0
