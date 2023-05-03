@@ -1,4 +1,171 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ProjectRootManager" version="2" project-jdk-name="$USER_HOME$/anaconda3" project-jdk-type="Python SDK" />
+  <component name="SVCompilerDirectivesDefines">
+    <option name="define">
+      <map>
+        <entry key="ADDR">
+          <value>
+            <Define>
+              <option name="definitions">
+                <list>
+                  <Body>
+                    <option name="offset" value="83" />
+                    <option name="replacementList" value="32'hFF" />
+                    <option name="source" value="jkff.sv" />
+                  </Body>
+                  <Body>
+                    <option name="offset" value="103" />
+                    <option name="replacementList" value="(ADDR + 32'hFF00)" />
+                    <option name="source" value="jkff.sv" />
+                  </Body>
+                </list>
+              </option>
+            </Define>
+          </value>
+        </entry>
+        <entry key="B2B_">
+          <value>
+            <Define>
+              <option name="definitions">
+                <list>
+                  <Body>
+                    <option name="inclusionDependencies">
+                      <list>
+                        <InclusionDependency>
+                          <option name="name" value="TESTCODE" />
+                          <option name="rule" value="NOT_DEFINED" />
+                        </InclusionDependency>
+                      </list>
+                    </option>
+                    <option name="offset" value="187" />
+                    <option name="replacementList" value="1" />
+                    <option name="source" value="jkff.sv" />
+                  </Body>
+                </list>
+              </option>
+            </Define>
+          </value>
+        </entry>
+        <entry key="B2B_2">
+          <value>
+            <Define>
+              <option name="definitions">
+                <list>
+                  <Body>
+                    <option name="inclusionDependencies">
+                      <list>
+                        <InclusionDependency>
+                          <option name="name" value="TESTCODE" />
+                          <option name="rule" value="DEFINED" />
+                        </InclusionDependency>
+                      </list>
+                    </option>
+                    <option name="offset" value="208" />
+                    <option name="replacementList" value="0" />
+                    <option name="source" value="jkff.sv" />
+                  </Body>
+                </list>
+              </option>
+            </Define>
+          </value>
+        </entry>
+        <entry key="C_LOG_2">
+          <value>
+            <Define>
+              <option name="definitions">
+                <list>
+                  <Body>
+                    <option name="offset" value="1172" />
+                    <option name="parameters">
+                      <list>
+                        <Parameter>
+                          <option name="name" value="n" />
+                        </Parameter>
+                      </list>
+                    </option>
+                    <option name="replacementList" value="(&#10;(n) &lt;= (1&lt;&lt;0) ? 0 : (n) &lt;= (1&lt;&lt;1) ? 1 :&#10;(n) &lt;= (1&lt;&lt;2) ? 2 : (n) &lt;= (1&lt;&lt;3) ? 3 :&#10;(n) &lt;= (1&lt;&lt;4) ? 4 : (n) &lt;= (1&lt;&lt;5) ? 5 :&#10;(n) &lt;= (1&lt;&lt;6) ? 6 : (n) &lt;= (1&lt;&lt;7) ? 7 :&#10;(n) &lt;= (1&lt;&lt;8) ? 8 : (n) &lt;= (1&lt;&lt;9) ? 9 :&#10;(n) &lt;= (1&lt;&lt;10) ? 10 : (n) &lt;= (1&lt;&lt;11) ? 11 :&#10;(n) &lt;= (1&lt;&lt;12) ? 12 : (n) &lt;= (1&lt;&lt;13) ? 13 :&#10;(n) &lt;= (1&lt;&lt;14) ? 14 : (n) &lt;= (1&lt;&lt;15) ? 15 :&#10;(n) &lt;= (1&lt;&lt;16) ? 16 : (n) &lt;= (1&lt;&lt;17) ? 17 :&#10;(n) &lt;= (1&lt;&lt;18) ? 18 : (n) &lt;= (1&lt;&lt;19) ? 19 :&#10;(n) &lt;= (1&lt;&lt;20) ? 20 : (n) &lt;= (1&lt;&lt;21) ? 21 :&#10;(n) &lt;= (1&lt;&lt;22) ? 22 : (n) &lt;= (1&lt;&lt;23) ? 23 :&#10;(n) &lt;= (1&lt;&lt;24) ? 24 : (n) &lt;= (1&lt;&lt;25) ? 25 :&#10;(n) &lt;= (1&lt;&lt;26) ? 26 : (n) &lt;= (1&lt;&lt;27) ? 27 :&#10;(n) &lt;= (1&lt;&lt;28) ? 28 : (n) &lt;= (1&lt;&lt;29) ? 29 :&#10;(n) &lt;= (1&lt;&lt;30) ? 30 : (n) &lt;= (1&lt;&lt;31) ? 31 : 32)" />
+                    <option name="source" value="axi_master.v" />
+                  </Body>
+                </list>
+              </option>
+            </Define>
+          </value>
+        </entry>
+        <entry key="DONE">
+          <value>
+            <Define>
+              <option name="definitions">
+                <list>
+                  <Body>
+                    <option name="offset" value="134" />
+                    <option name="replacementList" value="1" />
+                    <option name="source" value="jkff.sv" />
+                  </Body>
+                </list>
+              </option>
+            </Define>
+          </value>
+        </entry>
+        <entry key="HAAD">
+          <value>
+            <Define>
+              <option name="definitions">
+                <list>
+                  <Body>
+                    <option name="offset" value="149" />
+                    <option name="replacementList" value="TRY" />
+                    <option name="source" value="jkff.sv" />
+                  </Body>
+                </list>
+              </option>
+            </Define>
+          </value>
+        </entry>
+        <entry key="OK">
+          <value>
+            <Define>
+              <option name="definitions">
+                <list>
+                  <Body>
+                    <option name="offset" value="43" />
+                    <option name="replacementList" value="TEST" />
+                    <option name="source" value="jkff.sv" />
+                  </Body>
+                </list>
+              </option>
+            </Define>
+          </value>
+        </entry>
+        <entry key="TRS">
+          <value>
+            <Define>
+              <option name="definitions">
+                <list>
+                  <Body>
+                    <option name="offset" value="59" />
+                    <option name="source" value="jkff.sv" />
+                  </Body>
+                </list>
+              </option>
+            </Define>
+          </value>
+        </entry>
+        <entry key="TRY">
+          <value>
+            <Define>
+              <option name="definitions">
+                <list>
+                  <Body>
+                    <option name="offset" value="71" />
+                    <option name="source" value="jkff.sv" />
+                  </Body>
+                </list>
+              </option>
+            </Define>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
 </project>

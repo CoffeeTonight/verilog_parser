@@ -44,7 +44,7 @@ class PORT:
 
 class HDLFILE:
     def __repr__(self):
-        return f'{self.file}'
+        return f'{self.name}'
 
     def __init__(self, vfile):
         self.name = vfile
@@ -260,7 +260,19 @@ class verilog_parser():
             return None
         return _[0][statement.__len__():].strip()
 
+
+    def extractFlist(self, file):
+        if not (file.name.endswith(".v") or file.name.endswith(".sv")):
+            flist = open(file.name, "r", encoding="utf8").readlines()
+            flist = [self.extractFlist(i.strip().rstrip()) for i in flist if not (i.startswith("//") or i.startswith("#"))]
+            return flist
+        else:
+            return file if isinstance(file, HDLFILE) else HDLFILE(file)
+
+
     def seq_parse(self):
+        for file in copy.deepcopy(self.hdlfile[1:]):
+            self.hdlfile += [self.extractFlist(file)]
         for file in self.hdlfile:
             hdl = open(file.name, "r", encoding="utf8").read().replace("\t", "    ")
 
@@ -272,7 +284,7 @@ class verilog_parser():
             defcode, code_seqs = self.merge_nestedcode(ncode, file.definition)
             assert ncode.__len__() == defcode.__len__(), "ERR::Check Tool"
 
-            outofcode, lmodule = self.cutout_code(defcode.replace("\t", " "), self.startsends["module"])
+            outofcode, lmodule = self.cutout_code(defcode.replace("\t", " ").replace("\\\n", " "), self.startsends["module"])
 
             for v in outofcode.replace("\t", "").split("\n"):
                 v = v.strip().rstrip()
@@ -296,29 +308,57 @@ class verilog_parser():
                     if module.name is None:
                         module.name = self.getNameWith(_, list(self.startsends["module"])[0])
                     if "parameter " in _:
-                        module.param.update({i.split("=")[0].replace("parameter", "").strip().rstrip():
-                                                 i.split("=")[-1].strip().rstrip() \
-                                             for i in re.split(",|\)|\(|#", _) if "parameter " in i})
+                        x = {i.split("=")[0].replace("parameter", ""): {"val": i.split("=")[-1].strip().rstrip()} \
+                             for i in re.split(",|\)|\(|#", _) if "parameter " in i}
+                        z = {}
+                        for xk, xv in x.items():
+                            xx = re.findall("\w+", xk)
+                            xv.update({"type": (xx[0] if xx.__len__() == 2 else "")})
+                            z.update({xx[-1]: xv})
+                        module.param.update(z)
                     if any([f"{i} " in _ for i in self.startsends["port"]]):
                         ptype = "wire"
-                        pdim = ["", ""]
-                        for m in _.split("(")[-1].split(","):
-                            m = m.strip().replace("[", " [ ").replace("[", " ] ")
-                            pdir_ = [i for i in self.startsends["port"] if m.startswith(i)]
+                        pdir = ""
+                        for m in _.split(","):
+                            m = m.strip().replace("[", " [ ").replace("]", " ] ")
+                            pdir_ = [i for i in self.startsends["port"] if i+" " in m]
+                            if not (pdir or pdir_):
+                                continue
+                            m = m[m.index(pdir_[0]):] if pdir_ != [] else m
                             pdir = pdir_[0] if pdir_ != [] else pdir
                             ptype_ = [i for i in self.startsends["definition"] if i in m]
-                            ptype = ptype if ptype_ == [] else ptype[0] if pdir_ != [] else ptype
-                            pname = m.replace(pdir, "").replace(ptype, "").split("]")[-1].split("[")[0].strip().rstrip()
-                            if "[" in m:
-                                pdim = [i.split("]")[0].strip().rstrip() for i in m.split("[")] if pdir_ != [] else pdim
+                            ptype = ptype if ptype_ == [] else ptype_[0] if pdir_ != [] else ptype
+                            pname, x = self.cutout_code(m.replace(pdir, "").replace(ptype, ""), {"[": "]"})
+                            pname = pname.strip().rstrip(")").rstrip()
+                            if "[" in m and pdir_ != []:
+                                pdim = x
+                                array = [i for i in pdim if m.index(pname) > m.index(i)]
+                                dimm = [i for i in pdim if i not in array]
+                            elif "[" not in m and pdir_ != []:
+                                array = []
+                                dimm = []
                             port = PORT(pname)
                             port.type = ptype
                             port.dir = pdir
-                            port.array = pdim[0]
-                            port.dimm = pdim[1:]
-                            port.vlnv = "coffee2night:general:adhoc:1.0"
+                            port.array = array
+                            port.dimm = dimm
+                            port.vlnv = "coffee2night::unknown::adhoc::1.0"
                             module.port.update({pname: port})
                 file.inst += [module]
+        return self.hdlfile
+
+
+def dumppickle(sts):
+    import pickle
+    with open('hdl.class.pickle', 'wb') as fpick:
+        pickle.dump(sts, fpick)
+
+
+def loadpickle(sts=None):
+    import pickle
+    with open('hdl.class.pickle' if sts is None else sts, 'rb') as fpick:
+        return pickle.load(fpick)
+
 
 if __name__=="__main__":
     import argparse
@@ -328,4 +368,7 @@ if __name__=="__main__":
     parser.add_argument('-o', '--outdir', action="store", help="directory for result", default="OUT_VPARSE")
     args = parser.parse_args()
 
-    verilog_parser(args)
+    class_hdlfile = verilog_parser(args)
+    dumppickle(class_hdlfile)
+    # mhdlfile_ = loadpickle()
+    a = 0
