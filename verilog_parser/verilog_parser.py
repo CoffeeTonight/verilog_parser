@@ -7,7 +7,7 @@ __copyright__ = "Copyright 2023, free"
 __credits__ = ["dyxn.tonightcoffee@gmail.com"]
 __date__ = "2023/04/30"
 __deprecated__ = False
-__email__ =  "dyxn.tonightcoffee@gmail.com"
+__email__ = "dyxn.tonightcoffee@gmail.com"
 __license__ = "MIT"
 __maintainer__ = "developer"
 __status__ = "Testing"
@@ -27,9 +27,14 @@ class HDL:
 
     def __init__(self, name):
         self.name = name
-        for i in ["inst", "port", "comment", "preprocessor", "subroutine", "param", "lparam",
-                  "wire", "reg", "assign", "definition", "inlinedefine", "unknown"]:
+        for i in ["codemodule", "param", "inst", "port", "comment", "preprocessor", "subroutine", "lparam",
+                  "wire", "reg", "assign", "definition", "metaIF", "inlinedefine", "unknown"]:
             self.__setattr__(i, {})
+
+class IPXACT:
+    def __init__(self):
+        for i in ["vlnv", "logicalName", "prefix", "postfix", "metaname"]:
+            self.__setattr__(i, str)
 
 
 class PORT:
@@ -38,8 +43,10 @@ class PORT:
 
     def __init__(self, name):
         self.name = name
-        for i in ["dir", "dimm", "array", "type", "vlnv", "logicalName", "prefix", "postfix"]:
+        self.ipxact = IPXACT
+        for i in ["dir", "dimm", "array", "type"]:
             self.__setattr__(i, str)
+
 
 
 class HDLFILE:
@@ -84,10 +91,6 @@ class verilog_parser():
         self.startsends = startsends
         self.updateDefine()
         self.seq_parse()
-
-
-
-
 
     def openvfiles(self):
         assert os.path.isfile(self.args.src), f"ERR:: {self.args.src} File not founded"
@@ -212,7 +215,6 @@ class verilog_parser():
                     assert rctxt.__len__() == chgtxt.__len__(), "ERR:: Check Tool"
                     rctxt = chgtxt
                     TXTPOS = seqend
-                a = rctxt[k:seqval["E"]]
         return rctxt, cond
 
     def findValbyKey(self, _s, key):
@@ -276,6 +278,13 @@ class verilog_parser():
 
 
     def seq_parse(self):
+        pattern_module = r"\s*module\s+([\w\d_]+)(\s*#\s*\(\s*parameter\s+.*\))?\s*\((.*)\)"
+        pattern_param = r"[\s|\(|,]+\s*parameter\s+(\w+\s*)?([\w\d_]+)\s*=\s*([\w\d_]+)"
+        pattern_portb = r"\s*(input|output|inout|buffer)\s+(wire\s+|reg\s+)?(\[.*\])?\s*([\d\w_]+)(\[.*\])?"
+        pattern_conn = r"\.(?P<name>\w+)\s*\((?P<value>.*?)\)"
+        pattern_inst = r"\s*([\w\d_]+)(\s*#\s*\(\..*\))?\s*([\w\d_]+)\s*\(\s*\.(.*)\)"
+        pattern_assign = r"\s*assign\s+(.*)\s*=\s*(.*)"
+        pattern_always = r""
         hdlfile = []
         for file in copy.deepcopy(self.hdlfile):
             hdlfile += [self.extractFlist(file)]
@@ -298,8 +307,8 @@ class verilog_parser():
                     continue
                 #grep preprocessor
                 if any([v.startswith(i) for i in list(self.startsends["preprocess"])]):
-                    if "inCommand" not in file.preprocessor:
-                        file.preprocessor.update({"inCommand": self.define, "code": []})
+                    if "command" not in file.preprocessor:
+                        file.preprocessor.update({"command": self.define, "code": []})
                     file.preprocessor["code"] += [v]
                 else:
                     if "outofcode" not in file.unknown:
@@ -308,58 +317,48 @@ class verilog_parser():
 
             for v in lmodule:
                 module = HDL(None)
-                v = v.replace("\n", " ").split(";")
-                for _ in v:
-                    inst = re.findall("\w+[|\w+|#][\(\.|\w+][\(\.\w+\(\w+\)\,|\(\.\w+\(\w+\)]+\)",
-                                      _.replace(" ", "").replace("#", " #"))
-                    if inst:
-                        if "#" in _:
-                            inst_module = [i for i in _.split("#")[0].split(" ") if i != ""][-1]
-                            instance = inst[0].split("))")[1].split("(.")[0].strip().rstrip()
-                        else:
-                            inst_module = [i for i in _.split("(")[0].split(" ") if i != ""][-2]
-                            instance = [i for i in _.split("(.")[0].split(" ") if i != ""][-1]
-                        module.inst[instance] = {"code": _[_.index(inst_module):], "module": inst_module}
-                    _ = _.strip().rstrip().replace(")", " ) ").replace("(", " ( ")
-                    if module.name is None:
-                        module.name = self.getNameWith(_, list(self.startsends["module"])[0])
-                    if "parameter " in _:
-                        x = {i.split("=")[0].replace("parameter", ""): {"val": i.split("=")[-1].strip().rstrip()} \
-                             for i in re.split(",|\)|\(|#", _) if "parameter " in i}
-                        z = {}
-                        for xk, xv in x.items():
-                            xx = re.findall("\w+", xk)
-                            xv.update({"type": (xx[0] if xx.__len__() == 2 else "")})
-                            z.update({xx[-1]: xv})
-                        module.param.update(z)
-                    if any([f"{i} " in _ for i in self.startsends["port"]]):
-                        ptype = "wire"
-                        pdir = ""
-                        for m in _.split(","):
-                            m = m.strip().replace("[", " [ ").replace("]", " ] ")
-                            pdir_ = [i for i in self.startsends["port"] if i+" " in m]
-                            if not (pdir or pdir_):
-                                continue
-                            m = m[m.index(pdir_[0]):] if pdir_ != [] else m
-                            pdir = pdir_[0] if pdir_ != [] else pdir
-                            ptype_ = [i for i in self.startsends["definition"] if i in m]
-                            ptype = ptype if ptype_ == [] else ptype_[0] if pdir_ != [] else ptype
-                            pname, x = self.cutout_code(m.replace(pdir, "").replace(ptype, ""), {"[": "]"})
-                            pname = pname.strip().rstrip(")").rstrip()
-                            if "[" in m and pdir_ != []:
-                                pdim = x
-                                array = [i for i in pdim if m.index(pname) > m.index(i)]
-                                dimm = [i for i in pdim if i not in array]
-                            elif "[" not in m and pdir_ != []:
-                                array = []
-                                dimm = []
-                            port = PORT(pname)
-                            port.type = ptype
-                            port.dir = pdir
-                            port.array = array
-                            port.dimm = dimm
-                            port.vlnv = "coffee2night::unknown::adhoc::1.0"
-                            module.port.update({pname: port})
+                vv = v.replace("\n", " ").split(";")
+                for n, _ in enumerate(vv):
+                    if not module.name:
+                        module_casts = re.findall(pattern_module, _, re.MULTILINE)
+                    if module_casts:
+                        module_cast = module_casts[0]
+                        module.name = module_cast[0]
+                        module.param = re.findall(pattern_param, module_cast[1], re.MULTILINE)
+                        module_port = []
+                        for p in module_cast[2].split(","):
+                            module_port += re.findall(pattern_portb, p, re.MULTILINE)
+                        module.port = module_port
+                        module.codemodule = _
+                        module_casts = None
+                        continue
+                    insts = re.findall(pattern_inst, _, re.MULTILINE)
+                    if insts:
+                        inst = insts[0]
+                        inst_module = inst[0]
+                        params = re.findall(pattern_conn, inst[1], re.MULTILINE) if inst[1] else []
+                        instance = inst[2]
+                        instance_conn = re.findall(pattern_conn, inst[3], re.MULTILINE)
+                        module.inst[instance] = {"code": _[_.index(inst_module):],
+                                                 "module": inst_module, "module_param": params,
+                                                 "inst": instance, "inst_conn": instance_conn}
+                        continue
+                    if module.port == []:
+                        ports = re.findall(pattern_portb, _, re.MULTILINE)
+                        if ports:
+                            tpport = ports[0]
+                            for p in tpport[3].split(","):
+                                port = PORT(p)
+                                port.type = "wire" if tpport[1] == "" else tpport[1]
+                                port.dir = tpport[0]
+                                port.array = tpport[2]
+                                port.dimm = tpport[4]
+                                port.ipxact.vlnv = "coffee2night::unknown::adhoc::1.0"
+                            continue
+                    assign = re.findall(pattern_assign, _, re.MULTILINE)
+                    if assign:
+                        module.assign = assign
+                        continue
                 file.inst += [module]
         self.hdlfile = hdlfile
         return self.hdlfile
@@ -372,7 +371,7 @@ def dumppickle(args, sts='class.hdl.pickle'):
     os.makedirs(args.outdir, exist_ok=True)
     with open(sts, 'wb') as fpick:
         pickle.dump(sts, fpick)
-    print(f"\nINFO::Pickle file for Meta data Had Stored, {sts}")
+    print(f"\nINFO::Pickle file for Meta-data had stored, {sts}")
 
 
 def loadpickle(sts='class.hdl.pickle'):
@@ -384,6 +383,13 @@ def loadpickle(sts='class.hdl.pickle'):
     print(f"\nINFO::Pickle file for Meta data Had Loaded, {sts}")
 
 
+def main(args):
+    class_hdlfile = verilog_parser(args)
+    if args.pickle:
+        dumppickle(args, class_hdlfile)
+    return class_hdlfile
+
+
 if __name__=="__main__":
     import argparse
     parser = argparse.ArgumentParser(description='Optional app description')
@@ -392,10 +398,11 @@ if __name__=="__main__":
     parser.add_argument('-f', '--findcondition', help="Condition to find specific v file", default="")
     parser.add_argument('-D', '--define', help="source file", default="")
     parser.add_argument('-o', '--outdir', action="store", help="directory for result", default="OUT_VPARSE")
+    parser.add_argument('-a', '--argument', help="more argument. profile/", default="")
     args = parser.parse_args()
 
-    class_hdlfile = verilog_parser(args)
-
-    dumppickle(args, class_hdlfile)
-    # mhdlfile_ = loadpickle()
-    a = 0
+    if "profile" in args.argument:
+        import cProfile
+        cProfile.run('main(args)')
+    else:
+        main(args)
