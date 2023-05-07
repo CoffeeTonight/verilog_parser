@@ -1,0 +1,8 @@
+{
+  "module": "module axi_*",
+  "comments": "`ifdef AXI_MON\n//Monitor Insertion\n{}\n`endif\n",
+  "codecommand": "wire MON_RV = (*AXI_AWVALID* & *AXI_AWREADY*) == 1;\ninitial begin\nwait(MON_RV); $display(\"AXI_MON:@%t,%m,RV==1\", $realtime);\nend\n",
+  "seqcodecommand": "initial begin\nforce *M_AXI_AWADDR* = 'h0; force *M_AXI_AWVALID* = 0; wait(tb_dut.seq[%ENUM_CNT%] == 1); force *M_AXI_AWADDR* = 'h%ENUM_CNT%; force *M_AXI_AWVALID* = 1;\nend\n",
+  "clksrc": "tb_dut.seqclk[%ENUM_CNT%]",
+  "resetsrc": "tb_dut.seqreset[%ENUM_CNT%]"
+}

@@ -102,6 +102,18 @@ Multiline Comment
 ,   .I1({16{~q}})
 );
 
+	DALD  uDAL(
+    .clk (clk)
+,   .reset (rst)
+,   .I0({16{q}})
+);
+
+	CALD  uDAL(
+    .clk (clk)
+,   .reset (rst)
+,   .I0({16{q}})
+);
+
 `ifndef NOINST
 CALC #(.wd(16), .init(0)) icalc(
     .clk (clk)

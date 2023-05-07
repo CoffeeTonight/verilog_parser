@@ -15,10 +15,13 @@ __version__ = "0.0.1"
 
 
 import re
-import json
 import os
 import copy
-from collections import OrderedDict
+
+
+class Namespace:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
 
 
 class HDL:
@@ -27,26 +30,45 @@ class HDL:
 
     def __init__(self, name):
         self.name = name
-        for i in ["codemodule", "param", "inst", "port", "comment", "preprocessor", "subroutine", "lparam",
-                  "wire", "reg", "assign", "definition", "metaIF", "inlinedefine", "unknown"]:
+        for i in ["path", "codemodule", "param", "inst", "port", "comment", "preprocessor", "subroutine", "lparam",
+                  "wire", "reg", "assign", "always", "definition", "metaIF", "inlinedefine", "unknown", "endmodule",
+                  "posedge", "negedge", "clock", "reset"]:
             self.__setattr__(i, {})
 
 class IPXACT:
+    def __repr__(self):
+        return f'{self.vlnv}'
+
     def __init__(self):
         for i in ["vlnv", "logicalName", "prefix", "postfix", "metaname"]:
             self.__setattr__(i, str)
 
 
+class IPXACTlib:
+    def __init__(self):
+        self.busDef = {}
+        self.absDef = {}
+        self.absDef2port = {"general::system::clock_rtl::1.0": ["clock"],
+                            "general::system::reset_rtl::1.0": ["reset", "soft_reset", "sw_reset"],
+                            "general::system::intr_rtl::1.0": ["intr", "irq", "fiq"],
+                            }
+    def port2vlnv(self, port):
+        for k, v in self.absDef2port.items():
+            for p in v:
+                if port == p:
+                    return k
+        return None
+
+
 class PORT:
     def __repr__(self):
-        return f'{self.vlnv}'
+        return f'{self.ipxact}'
 
     def __init__(self, name):
         self.name = name
-        self.ipxact = IPXACT
+        self.ipxact = IPXACT()
         for i in ["dir", "dimm", "array", "type"]:
             self.__setattr__(i, str)
-
 
 
 class HDLFILE:
@@ -83,6 +105,8 @@ class verilog_parser():
                       "div": ["\n", " "]
                       }
         self.args = args
+        self.ipxactlib = IPXACTlib()
+        self.define = {}
         self.filelist = []
         self.inlinedefine = {}
         self.openvfiles()
@@ -103,15 +127,16 @@ class verilog_parser():
                                  for i in f if os.path.isfile(i.strip().rstrip())]
 
     def updateDefine(self):
-        defines = self.args.define
-        if os.path.isfile(self.args.define):
-            f = open(self.args.define, "r", encoding="utf8").readlines()
-            f = [i for i in f if not (i.startswith("//") or i.startswith("#"))]
-            f = {i.split("=")[0]: i.split("=")[-1] if "=" in i else True for i in "".join(f).split(",")}
-            defines = f
-        else:
-            defines = {i.split("=")[0]: i.split("=")[-1] if "=" in i else True for i in defines.split(",")}
-        self.define = defines
+        if hasattr(self.args, "define"):
+            defines = self.args.define
+            if os.path.isfile(self.args.define):
+                f = open(self.args.define, "r", encoding="utf8").readlines()
+                f = [i for i in f if not (i.startswith("//") or i.startswith("#"))]
+                f = {i.split("=")[0]: i.split("=")[-1] if "=" in i else True for i in "".join(f).split(",")}
+                defines = f
+            else:
+                defines = {i.split("=")[0]: i.split("=")[-1] if "=" in i else True for i in defines.split(",")}
+            self.define = defines
         self.define.update({1: True, 0: False, "1": True, "0": False})
 
     def cutout_code(self, txt, conts: dict):
@@ -267,7 +292,6 @@ class verilog_parser():
             return None
         return _[0][statement.__len__():].strip()
 
-
     def extractFlist(self, file):
         if not (file.name.endswith(".v") or file.name.endswith(".sv")):
             flist = open(file.name, "r", encoding="utf8").readlines()
@@ -276,15 +300,17 @@ class verilog_parser():
         else:
             return file if isinstance(file, HDLFILE) else HDLFILE(file)
 
-
     def seq_parse(self):
         pattern_module = r"\s*module\s+([\w\d_]+)(\s*#\s*\(\s*parameter\s+.*\))?\s*\((.*)\)"
         pattern_param = r"[\s|\(|,]+\s*parameter\s+(\w+\s*)?([\w\d_]+)\s*=\s*([\w\d_]+)"
-        pattern_portb = r"\s*(input|output|inout|buffer)\s+(wire\s+|reg\s+)?(\[.*\])?\s*([\d\w_]+)(\[.*\])?"
+        pattern_portb = r"\s*(input|output|inout|buffer)\s+(wire\s|reg\s)?\s*(\[.*\])?\s*([\d\w_]+)(\[.*\])?"
         pattern_conn = r"\.(?P<name>\w+)\s*\((?P<value>.*?)\)"
         pattern_inst = r"\s*([\w\d_]+)(\s*#\s*\(\..*\))?\s*([\w\d_]+)\s*\(\s*\.(.*)\)"
         pattern_assign = r"\s*assign\s+(.*)\s*=\s*(.*)"
-        pattern_always = r""
+        pattern_endmodule = r"[^\w\d_]endmodule\s*"
+        pattern_always = r"\s*always\s*@\s*\((?P<sensitivelist>.*)\)"
+        pattern_begin = r"\bbegin\b"
+        pattern_end = r"\bend\b"
         hdlfile = []
         for file in copy.deepcopy(self.hdlfile):
             hdlfile += [self.extractFlist(file)]
@@ -299,7 +325,8 @@ class verilog_parser():
             defcode, code_seqs = self.merge_nestedcode(ncode, file.definition)
             assert ncode.__len__() == defcode.__len__(), "ERR::Check Tool"
 
-            outofcode, lmodule = self.cutout_code(defcode.replace("\t", " ").replace("\\\n", " "), self.startsends["module"])
+            outofcode, lmodule = self.cutout_code(defcode.replace("\t", " ").replace("\\\n", " "),
+                                                  self.startsends["module"])
 
             for v in outofcode.replace("\t", "").split("\n"):
                 v = v.strip().rstrip()
@@ -315,53 +342,103 @@ class verilog_parser():
                         file.unknown.update({"outofcode": []})
                     file.unknown["outofcode"] += [v]
 
+            begin_end_bal = 0
+            on_always = False
             for v in lmodule:
                 module = HDL(None)
-                vv = v.replace("\n", " ").split(";")
-                for n, _ in enumerate(vv):
-                    if not module.name:
-                        module_casts = re.findall(pattern_module, _, re.MULTILINE)
-                    if module_casts:
-                        module_cast = module_casts[0]
-                        module.name = module_cast[0]
-                        module.param = re.findall(pattern_param, module_cast[1], re.MULTILINE)
-                        module_port = []
-                        for p in module_cast[2].split(","):
-                            module_port += re.findall(pattern_portb, p, re.MULTILINE)
-                        module.port = module_port
-                        module.codemodule = _
-                        module_casts = None
-                        continue
-                    insts = re.findall(pattern_inst, _, re.MULTILINE)
-                    if insts:
-                        inst = insts[0]
-                        inst_module = inst[0]
-                        params = re.findall(pattern_conn, inst[1], re.MULTILINE) if inst[1] else []
-                        instance = inst[2]
-                        instance_conn = re.findall(pattern_conn, inst[3], re.MULTILINE)
-                        module.inst[instance] = {"code": _[_.index(inst_module):],
-                                                 "module": inst_module, "module_param": params,
-                                                 "inst": instance, "inst_conn": instance_conn}
-                        continue
-                    if module.port == []:
-                        ports = re.findall(pattern_portb, _, re.MULTILINE)
-                        if ports:
-                            tpport = ports[0]
-                            for p in tpport[3].split(","):
-                                port = PORT(p)
-                                port.type = "wire" if tpport[1] == "" else tpport[1]
+                module.always = []
+                module.path = file.name
+                vv = v.replace("\n", "\t").split(";")
+                for n, __ in enumerate(vv):
+                    for _ in re.sub(r"\bend\b", "$end;", __).split(";"):
+                        always = re.findall(pattern_always, _, re.MULTILINE)
+                        if always or on_always:
+                            if always:
+                                _posedge = [i.rstrip().split(" ") for i in always if "posedge" in i]
+                                _negedge = [i.rstrip().split(" ") for i in always if "negedge" in i]
+                                for _ps in _posedge + _negedge:
+                                    sysport = "clock" if any([i in _ps[1].lower() for i in ["clk", "ck", "clock"]]) else "reset"
+                                    _a = _ps[1].strip().rstrip() in list(module.port)
+                                    if _a:
+                                        module.port[_ps[1]].ipxact.vlnv = self.getVLNVwPort(sysport)
+                                    if "posedge" in _ps[0]:
+                                        if _ps[1] not in module.posedge:
+                                            module.posedge[_ps[1]] = {"count": 0, "type": f"port_{sysport}" \
+                                                                                    if _a else f"gated_{sysport}"}
+                                        module.posedge[_ps[1]]["count"] += 1
+                                    else:
+                                        if _ps[1] not in module.negedge:
+                                            module.negedge[_ps[1]] = {"count": 0, "type": f"port_{sysport}" \
+                                                                                    if _a else f"gated_{sysport}"}
+                                        module.negedge[_ps[1]]["count"] += 1
+                            begin_val = re.findall(pattern_begin, _)
+                            end_val = re.findall(pattern_end, _)
+                            begin_end_bal += begin_val.__len__() - end_val.__len__()
+                            if on_always:
+                                module.always[-1] += _.replace("\t", "\n") + ";"
+                            else:
+                                if module.always.__len__() > 0:
+                                    module.always[-1] = re.sub("\$end;", "end", module.always[-1])
+                                module.always += [_.replace("\t", "\n") + ";"]
+                            on_always = begin_end_bal != 0
+                            continue
+                        if not module.name:
+                            module_casts = re.findall(pattern_module, _, re.MULTILINE)
+                        if module_casts:
+                            module_cast = module_casts[0]
+                            module.name = module_cast[0]
+                            module.param = re.findall(pattern_param, module_cast[1], re.MULTILINE)
+                            module.port = {}
+                            for p in module_cast[2].split(","):
+                                tpport = re.findall(pattern_portb, p, re.MULTILINE)[0]
+                                port = PORT(tpport[3])
+                                port.type = "wire " if tpport[1] == "" else tpport[1]
                                 port.dir = tpport[0]
                                 port.array = tpport[2]
                                 port.dimm = tpport[4]
-                                port.ipxact.vlnv = "coffee2night::unknown::adhoc::1.0"
+                                port.ipxact.vlnv = "all::unknown::adhoc::0.1"
+                                module.port[tpport[3]] = port
+                            module.codemodule = _.replace("\t", "\n") + ";"
+                            module_casts = None
                             continue
-                    assign = re.findall(pattern_assign, _, re.MULTILINE)
-                    if assign:
-                        module.assign = assign
-                        continue
+                        insts = re.findall(pattern_inst, _, re.MULTILINE)
+                        if insts:
+                            inst = insts[0]
+                            inst_module = inst[0]
+                            params = re.findall(pattern_conn, inst[1], re.MULTILINE) if inst[1] else []
+                            instance = inst[2]
+                            instance_conn = re.findall(pattern_conn, inst[3], re.MULTILINE)
+                            module.inst[instance] = {"code": _[_.index(inst_module):],
+                                                     "module": inst_module, "module_param": params,
+                                                     "inst": instance, "inst_conn": instance_conn}
+                            continue
+                        if module.port == {}:
+                            ports = re.findall(pattern_portb, _, re.MULTILINE)
+                            if ports:
+                                tpport = ports[0]
+                                for p in tpport[3].split(","):
+                                    port = PORT(p)
+                                    port.type = "wire " if tpport[1] == "" else tpport[1]
+                                    port.dir = tpport[0]
+                                    port.array = tpport[2]
+                                    port.dimm = tpport[4]
+                                    port.ipxact.vlnv = "coffee2night::unknown::adhoc::1.0"
+                                    module.port[p] = port
+                                continue
+                        assign = re.findall(pattern_assign, _, re.MULTILINE)
+                        if assign:
+                            module.assign = assign
+                            continue
+                        endmodule = re.findall(pattern_endmodule, _)
+                        if endmodule:
+                            module.endmodule = {n: 'replace("\n", "\t").split(";")'}
                 file.inst += [module]
         self.hdlfile = hdlfile
         return self.hdlfile
+
+
+    def getVLNVwPort(self, port):
+        return self.ipxactlib.port2vlnv(port)
 
 
 def dumppickle(args, sts='class.hdl.pickle'):
