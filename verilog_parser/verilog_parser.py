@@ -17,6 +17,7 @@ __version__ = "0.0.1"
 import re
 import os
 import copy
+import threading
 
 
 class Namespace:
@@ -30,7 +31,7 @@ class HDL:
 
     def __init__(self, name):
         self.name = name
-        for i in ["path", "codemodule", "param", "inst", "port", "comment", "preprocessor", "subroutine", "lparam",
+        for i in ["path", "codemodule", "param", "inst", "port", "comment", "preprocessor", "subroutine", "localparam",
                   "wire", "reg", "assign", "always", "definition", "metaIF", "inlinedefine", "unknown", "endmodule",
                   "posedge", "negedge", "clock", "reset"]:
             self.__setattr__(i, {})
@@ -147,10 +148,14 @@ class verilog_parser():
             idx_ = {code.index(i): i for i in conts if i in code}
             for k in sorted(list(idx_)):
                 v = idx_[k]
-                idx_end = code[k:].index(conts[v])
-                cutout_code += [code[k:k + idx_end + conts[v].__len__()]]
-                code = code[:k] + code[k + idx_end + conts[v].__len__():]
-                break
+                try:
+                    idx_end = code[k:].index(conts[v])
+                    cutout_code += [code[k:k + idx_end + conts[v].__len__()]]
+                    code = code[:k] + code[k + idx_end + conts[v].__len__():]
+                    break
+                except:
+                    cutout_code += [code[k:]]
+                    code = code[:k]
         return code, cutout_code
 
     def find_definition(self, txt, cond):
@@ -301,14 +306,15 @@ class verilog_parser():
             return file if isinstance(file, HDLFILE) else HDLFILE(file)
 
     def seq_parse(self):
-        pattern_module = r"\s*module\s+([\w\d_]+)(\s*#\s*\(\s*parameter\s+.*\))?\s*\((.*)\)"
-        pattern_param = r"[\s|\(|,]+\s*parameter\s+(\w+\s*)?([\w\d_]+)\s*=\s*([\w\d_]+)"
-        pattern_portb = r"\s*(input|output|inout|buffer)\s+(wire\s|reg\s)?\s*(\[.*\])?\s*([\d\w_]+)(\[.*\])?"
+        pattern_module = r"module\s+([\w\d_]+)\s*(#\s*\(\s*parameter\s+.*\))?\s*\((.*)\)"
+        pattern_mparam = r"\bparameter\b\s.*"
+        pattern_param = r"parameter\s+(\w+\s*)?([\w\d_]+)\s*=\s*(.*)"
+        pattern_lparam = r"localparam\s+(\w+\s*)?([\w\d_]+)\s*=\s*(.*)"
+        pattern_portb = r"(input|output|inout|buffer)\s+(wire\s|reg\s)?\s*(\[.*\])?\s*([\d\w_]+)(\[.*\])?"
         pattern_conn = r"\.(?P<name>\w+)\s*\((?P<value>.*?)\)"
-        pattern_inst = r"\s*([\w\d_]+)(\s*#\s*\(\..*\))?\s*([\w\d_]+)\s*\(\s*\.(.*)\)"
-        pattern_assign = r"\s*assign\s+(.*)\s*=\s*(.*)"
-        pattern_endmodule = r"[^\w\d_]endmodule\s*"
-        pattern_always = r"\s*always\s*@\s*\((?P<sensitivelist>.*)\)"
+        pattern_inst = r"([\w\d_]+)(\s*#\s*\(\s*\..*\))?\s*([\w\d_]+)\s*\(\s*\.(.*)\)"
+        pattern_endmodule = r"\bendmodule\b"
+        pattern_always = r"always\s*@\s*\((?P<sensitivelist>.*)\)"
         pattern_begin = r"\bbegin\b"
         pattern_end = r"\bend\b"
         hdlfile = []
@@ -347,73 +353,89 @@ class verilog_parser():
             for v in lmodule:
                 module = HDL(None)
                 module.always = []
+                module.localparam = []
+                module.param = []
+                module.wire = []
+                module.reg = []
+                module.assign = []
+                module.__setattr__("genvar", [])
+                module.__setattr__("generate", [])
+                module.__setattr__("conditional", [])
+                module.unknown = []
                 module.path = file.name
-                vv = v.replace("\n", "\t").split(";")
+                on_always = False
+                exist_if = False
+                vv = v.replace("\t", "    ").split(";")
                 for n, __ in enumerate(vv):
                     for _ in re.sub(r"\bend\b", "$end;", __).split(";"):
-                        always = re.findall(pattern_always, _, re.MULTILINE)
+                        _ = _.replace("\t", "    ").strip()
+                        _t = _.replace("\n", " ").strip().rstrip()
+                        if exist_if and _t.startswith("else "):
+                            on_always = True
+                        if _t.startswith("always"):
+                            always = re.findall(pattern_always, _t, re.MULTILINE)
+                        else:
+                            always = None
                         if always or on_always:
                             if always:
-                                _posedge = [i.rstrip().split(" ") for i in always if "posedge" in i]
-                                _negedge = [i.rstrip().split(" ") for i in always if "negedge" in i]
+                                exist_if = re.findall(r"\bif\b", _t)
+                                _posedge = re.findall(r"(\bposedge\b)\s*([\w\d_]+)", _t, re.MULTILINE)
+                                _negedge = re.findall(r"(\bnegedge\b)\s*([\w\d_]+)", _t, re.MULTILINE)
                                 for _ps in _posedge + _negedge:
                                     sysport = "clock" if any([i in _ps[1].lower() for i in ["clk", "ck", "clock"]]) else "reset"
                                     _a = _ps[1].strip().rstrip() in list(module.port)
                                     if _a:
                                         module.port[_ps[1]].ipxact.vlnv = self.getVLNVwPort(sysport)
-                                    if "posedge" in _ps[0]:
+                                    if "posedge" == _ps[0]:
                                         if _ps[1] not in module.posedge:
                                             module.posedge[_ps[1]] = {"count": 0, "type": f"port_{sysport}" \
                                                                                     if _a else f"gated_{sysport}"}
                                         module.posedge[_ps[1]]["count"] += 1
+                                        module.clock.update({_ps[1]: {} if _ps[1] not in module.clock else {}})
                                     else:
                                         if _ps[1] not in module.negedge:
                                             module.negedge[_ps[1]] = {"count": 0, "type": f"port_{sysport}" \
                                                                                     if _a else f"gated_{sysport}"}
                                         module.negedge[_ps[1]]["count"] += 1
+                                        module.reset.update({_ps[1]: {} if _ps[1] not in module.reset else {}})
                             begin_val = re.findall(pattern_begin, _)
                             end_val = re.findall(pattern_end, _)
                             begin_end_bal += begin_val.__len__() - end_val.__len__()
                             if on_always:
-                                module.always[-1] += _.replace("\t", "\n") + ";"
+                                module.always[-1] += _.replace("\t", "\n").replace("$end;", "end") + ";"
                             else:
                                 if module.always.__len__() > 0:
-                                    module.always[-1] = re.sub("\$end;", "end", module.always[-1])
+                                    module.always[-1] = module.always[-1].replace("$end;", "end")
                                 module.always += [_.replace("\t", "\n") + ";"]
                             on_always = begin_end_bal != 0
+                            if not on_always:
+                                module.always[-1] = module.always[-1].replace("$end;", "end")
                             continue
-                        if not module.name:
-                            module_casts = re.findall(pattern_module, _, re.MULTILINE)
+                        if not module.name and _.startswith("module "):
+                            module_casts = re.findall(pattern_module, _t.replace("\n", " "), re.MULTILINE)
                         if module_casts:
                             module_cast = module_casts[0]
                             module.name = module_cast[0]
-                            module.param = re.findall(pattern_param, module_cast[1], re.MULTILINE)
+                            module.param = [re.findall(pattern_mparam, i, re.MULTILINE)[0]
+                                            for i in module_cast[1].split(",")]
                             module.port = {}
-                            for p in module_cast[2].split(","):
-                                tpport = re.findall(pattern_portb, p, re.MULTILINE)[0]
-                                port = PORT(tpport[3])
-                                port.type = "wire " if tpport[1] == "" else tpport[1]
-                                port.dir = tpport[0]
-                                port.array = tpport[2]
-                                port.dimm = tpport[4]
-                                port.ipxact.vlnv = "all::unknown::adhoc::0.1"
-                                module.port[tpport[3]] = port
+                            try:
+                                for p in module_cast[2].split(","):
+                                    tpport = re.findall(pattern_portb, p, re.MULTILINE)[0]
+                                    port = PORT(tpport[3])
+                                    port.type = "wire " if tpport[1] == "" else tpport[1]
+                                    port.dir = tpport[0]
+                                    port.array = tpport[2]
+                                    port.dimm = tpport[4]
+                                    port.ipxact.vlnv = "all::unknown::adhoc::0.1"
+                                    module.port[tpport[3]] = port
+                            except:
+                                module.port = {}
                             module.codemodule = _.replace("\t", "\n") + ";"
                             module_casts = None
                             continue
-                        insts = re.findall(pattern_inst, _, re.MULTILINE)
-                        if insts:
-                            inst = insts[0]
-                            inst_module = inst[0]
-                            params = re.findall(pattern_conn, inst[1], re.MULTILINE) if inst[1] else []
-                            instance = inst[2]
-                            instance_conn = re.findall(pattern_conn, inst[3], re.MULTILINE)
-                            module.inst[instance] = {"code": _[_.index(inst_module):],
-                                                     "module": inst_module, "module_param": params,
-                                                     "inst": instance, "inst_conn": instance_conn}
-                            continue
-                        if module.port == {}:
-                            ports = re.findall(pattern_portb, _, re.MULTILINE)
+                        if [_t.startswith(i) for i in ["output ", "input ", "inout ", "buffer "]]:
+                            ports = re.findall(pattern_portb, _t, re.MULTILINE)
                             if ports:
                                 tpport = ports[0]
                                 for p in tpport[3].split(","):
@@ -425,13 +447,32 @@ class verilog_parser():
                                     port.ipxact.vlnv = "coffee2night::unknown::adhoc::1.0"
                                     module.port[p] = port
                                 continue
-                        assign = re.findall(pattern_assign, _, re.MULTILINE)
-                        if assign:
-                            module.assign = assign
+                        escape = False
+                        for i in ("genvar", "assign", "wire", "reg", "parameter", "localparam"):
+                            if re.findall(rf"\b{i}\b", _t):
+                                exec(f"module.{i} += [_]")
+                                escape = True
+                                break
+                        if escape:
+                            escape = False
                             continue
-                        endmodule = re.findall(pattern_endmodule, _)
-                        if endmodule:
-                            module.endmodule = {n: 'replace("\n", "\t").split(";")'}
+                        if "endmodule" in _t:
+                            endmodule = re.findall(pattern_endmodule, _t)
+                            if endmodule:
+                                module.endmodule = {n: 'replace("\n", "\t").split(";")'}
+                                continue
+                        insts = re.findall(pattern_inst, _t, re.MULTILINE)
+                        if insts:
+                            inst = insts[0]
+                            inst_module = inst[0]
+                            params = re.findall(pattern_conn, inst[1], re.MULTILINE) if inst[1] else []
+                            instance = inst[2]
+                            instance_conn = re.findall(pattern_conn, inst[3], re.MULTILINE)
+                            module.inst[instance] = {"code": _[_.index(inst_module):],
+                                                     "module": inst_module, "module_param": params,
+                                                     "inst": instance, "inst_conn": instance_conn}
+                            continue
+                        module.unknown += [_]
                 file.inst += [module]
         self.hdlfile = hdlfile
         return self.hdlfile
@@ -456,8 +497,8 @@ def loadpickle(sts='class.hdl.pickle'):
     if isinstance(sts, verilog_parser):
         sts = sts.args.src.split("/")[-1] + ".pickle"
     with open(sts, 'rb') as fpick:
+        print(f"\nINFO::Pickle file for Meta data Loaded, {sts}")
         return pickle.load(fpick)
-    print(f"\nINFO::Pickle file for Meta data Had Loaded, {sts}")
 
 
 def main(args):
@@ -471,7 +512,7 @@ if __name__=="__main__":
     import argparse
     parser = argparse.ArgumentParser(description='Optional app description')
     parser.add_argument('-s', '--src', help="source file", default="*.v")
-    parser.add_argument('-p', '--pickle', help="store meta as a pickle file", default="class.hdl.pickle")
+    parser.add_argument('-p', '--pickle', help="store meta as a pickle file", default="")
     parser.add_argument('-f', '--findcondition', help="Condition to find specific v file", default="")
     parser.add_argument('-D', '--define', help="source file", default="")
     parser.add_argument('-o', '--outdir', action="store", help="directory for result", default="OUT_VPARSE")
@@ -480,6 +521,6 @@ if __name__=="__main__":
 
     if "profile" in args.argument:
         import cProfile
-        cProfile.run('main(args)')
+        cProfile.run('[main(args) for i in range (0, 1024)]')
     else:
         main(args)

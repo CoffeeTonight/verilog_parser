@@ -26,9 +26,10 @@ input clk
 ,input reset
 ,input wire [wd-1:0]I0
 ,input wire [wd-1:0]I1
-,output reg [wd-1:0]O [1:0][1:0]
+,output reg [wd-1:0]O [0:1][0:1]
 );
-
+reg [30:0] aa,ba = 0;
+wire [2:0] #(3.1 + init) as = aa==0? 0:1;
 localparam LP=9;
 `ifdef SUM
 wire o = I0 + I1;
