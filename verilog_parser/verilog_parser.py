@@ -521,6 +521,6 @@ if __name__=="__main__":
 
     if "profile" in args.argument:
         import cProfile
-        cProfile.run('[main(args) for i in range (0, 1024)]')
+        cProfile.run('[main(args) for i in range (0, 1024*10)]')
     else:
         main(args)
